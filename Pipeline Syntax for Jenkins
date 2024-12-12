@@ -3,11 +3,9 @@
 pipeline {
     agent any
     environment {
-        // Define environment variables
-        SLACK_CHANNEL = 'ci-cd-buildstatus'  // Slack channel for notifications
-        SLACK_TOKEN = 'https://hooks.slack.com/services/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' // Slack webhook URL
+        SLACK_CHANNEL = 'ci-cd-buildstatus' // Slack channel for notifications
         DOCKER_IMAGE_NAME = 'unreal-engines'
-        DOCKER_REGISTRY = 'docker.io/maraboyinimadan'  // Docker Registry (e.g., DockerHub or your private registry)
+        DOCKER_REGISTRY = 'docker.io/maraboyinimadan' // Docker Registry
     }
     stages {
         stage('GIT-Checkout') {
@@ -26,16 +24,14 @@ pipeline {
         }
         stage('Build') {
             steps {
-                script {
-                    // Build the Maven project
-                    sh 'mvn clean package'
-                }
+                // Build the Maven project
+                sh 'mvn clean package'
             }
         }
         stage('Docker Build') {
             steps {
                 script {
-                    // Build Docker image using the GIT_COMMIT environment variable
+                    // Build Docker image
                     sh """
                     docker build -t ${DOCKER_REGISTRY}/${DOCKER_IMAGE_NAME}:${GIT_COMMIT} .
                     """
@@ -45,9 +41,8 @@ pipeline {
         stage('Docker Push') {
             steps {
                 script {
-                    // Login to Docker using Jenkins Credentials Plugin
+                    // Login to Docker and push the image
                     withCredentials([usernamePassword(credentialsId: 'docker-cred', usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
-                        // Push the Docker image to the registry
                         def imageTag = "${DOCKER_REGISTRY}/${DOCKER_IMAGE_NAME}:${GIT_COMMIT}"
                         sh "docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD}"
                         sh "docker push ${imageTag}"
@@ -55,4 +50,22 @@ pipeline {
                 }
             }
         }
+        stage('Notify Slack') {
+            steps {
+                script {
+                    // Slack notification
+                    withCredentials([string(credentialsId: 'slack-token', variable: 'SLACK_TOKEN')]) {
+                        def color = currentBuild.currentResult == 'SUCCESS' ? 'good' : (currentBuild.currentResult == 'FAILURE' ? 'danger' : 'warning')
+                        def message = "*${currentBuild.currentResult}:* Job ${env.JOB_NAME} \n Build ${env.BUILD_NUMBER} \n More info at: ${env.BUILD_URL}"
+                        slackSend(channel: SLACK_CHANNEL, color: color, message: message)
+                    }
+                }
+            }
+        }
+    }
+    post {
+        always {
+            echo 'Pipeline completed'
+        }
+    }
 }

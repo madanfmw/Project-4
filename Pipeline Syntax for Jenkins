@@ -1,10 +1,5 @@
 # Tools used in this pipeline git-hub, Maven, Docker, Slack
 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-def COLOR_MAP = [ 
-	'FAILURE' : 'danger'
-	'SUCCESS' : 'good'
-	
-	]
 pipeline {
     agent any
     environment {
@@ -60,17 +55,4 @@ pipeline {
                 }
             }
         }
-        stage('Notify Slack') {
-			post {
-				always {
-				echo 'Slack Notification'
-				slacksend (
-				channel: '#ci-cd-buildstatus'
-				color: COLOR_MAP[currentBuild.currentResult],
-				message: "*{currentBuild.currentResult}:* Job ${env.JOB_NAME} \n build ${env.BUILD_NUMBER} \n More info at: ${env.BUILD_URL}
-				)
-			}
-		}
-
-    }
 }

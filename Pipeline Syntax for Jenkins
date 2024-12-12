@@ -1,37 +1,34 @@
-# Tools used in this pipeline git-hub, Maven, Docker, Slack
-++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 pipeline {
     agent any
     environment {
-        SLACK_CHANNEL = 'ci-cd-buildstatus' // Slack channel for notifications
         DOCKER_IMAGE_NAME = 'unreal-engines'
-        DOCKER_REGISTRY = 'docker.io/maraboyinimadan' // Docker Registry
+        DOCKER_REGISTRY = 'docker.io/maraboyinimadan'
+        KUBECONFIG_CRED = 'k8s-kubeconfig' // Jenkins credential ID for kubeconfig
+        K8S_DEPLOYMENT_FILE = 'k8s-taxi-booking.yaml' // Path to Kubernetes YAML file
     }
     stages {
         stage('GIT-Checkout') {
             steps {
-                // Checkout code from Git repository
                 git branch: 'dev', url: 'https://github.com/madanfmw/taxi-booking.git'
             }
         }
         stage('Get Commit Hash') {
             steps {
                 script {
-                    // Fetch the latest commit hash
                     env.GIT_COMMIT = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
                 }
             }
         }
         stage('Build') {
             steps {
-                // Build the Maven project
-                sh 'mvn clean package'
+                script {
+                    sh 'mvn clean package'
+                }
             }
         }
         stage('Docker Build') {
             steps {
                 script {
-                    // Build Docker image
                     sh """
                     docker build -t ${DOCKER_REGISTRY}/${DOCKER_IMAGE_NAME}:${GIT_COMMIT} .
                     """
@@ -41,7 +38,6 @@ pipeline {
         stage('Docker Push') {
             steps {
                 script {
-                    // Login to Docker and push the image
                     withCredentials([usernamePassword(credentialsId: 'docker-cred', usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
                         def imageTag = "${DOCKER_REGISTRY}/${DOCKER_IMAGE_NAME}:${GIT_COMMIT}"
                         sh "docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD}"
@@ -50,14 +46,26 @@ pipeline {
                 }
             }
         }
+        stage('Deploy to Kubernetes') {
+            steps {
+                script {
+                    withCredentials([file(credentialsId: KUBECONFIG_CRED, variable: 'KUBECONFIG')]) {
+                        sh "kubectl apply -f ${K8S_DEPLOYMENT_FILE} --kubeconfig=${KUBECONFIG}"
+                        sh "kubectl set image deployment/taxi-booking-deployment taxi-booking-container=${DOCKER_REGISTRY}/${DOCKER_IMAGE_NAME}:${GIT_COMMIT} --kubeconfig=${KUBECONFIG}"
+                    }
+                }
+            }
+        }
         stage('Notify Slack') {
             steps {
                 script {
-                    // Slack notification
                     withCredentials([string(credentialsId: 'slack-token', variable: 'SLACK_TOKEN')]) {
-                        def color = currentBuild.currentResult == 'SUCCESS' ? 'good' : (currentBuild.currentResult == 'FAILURE' ? 'danger' : 'warning')
-                        def message = "*${currentBuild.currentResult}:* Job ${env.JOB_NAME} \n Build ${env.BUILD_NUMBER} \n More info at: ${env.BUILD_URL}"
-                        slackSend(channel: SLACK_CHANNEL, color: color, message: message)
+                        slackSend(
+                            channel: '#ci-cd-buildstatus',
+                            color: currentBuild.currentResult == 'SUCCESS' ? 'good' : 'danger',
+                            message: "*${currentBuild.currentResult}:* Job ${env.JOB_NAME} \nBuild ${env.BUILD_NUMBER} \nMore info: ${env.BUILD_URL}",
+                            tokenCredentialId: 'slack-token'
+                        )
                     }
                 }
             }
@@ -65,7 +73,9 @@ pipeline {
     }
     post {
         always {
-            echo 'Pipeline completed'
+            script {
+                echo "Pipeline finished with result: ${currentBuild.currentResult}"
+            }
         }
     }
 }
